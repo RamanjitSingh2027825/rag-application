@@ -1,0 +1,5 @@
+{
+  "name": "Lumina RAG Workspace",
+  "description": "A Google-inspired RAG chatbot workspace allowing document analysis, knowledge base management, and detailed usage tracking.",
+  "requestFramePermissions": []
+}
