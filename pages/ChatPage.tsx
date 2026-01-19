@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { streamGeminiResponse, estimateTokens, CHARS_PER_PAGE } from '../services/geminiService';
-import { Send, Plus, Bot, User, RefreshCw, FileText, X, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Send, Plus, Bot, User, RefreshCw, FileText, X, ChevronRight, Copy, Check, BookOpen } from 'lucide-react';
+import ReactMarkdown, { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { FileUpload } from '../components/FileUpload';
 import { DocumentFile } from '../types';
 
@@ -89,60 +90,124 @@ const CitationModal: React.FC<CitationModalProps> = ({ doc, page, onClose }) => 
   );
 };
 
+// --- Custom Code Block Component ---
+const CodeBlock = ({ inline, className, children, ...props }: any) => {
+    const [copied, setCopied] = useState(false);
+    const match = /language-(\w+)/.exec(className || '');
+    const language = match ? match[1] : '';
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    if (inline) {
+        return (
+            <code className="bg-gray-100 text-pink-600 rounded px-1.5 py-0.5 text-sm font-mono border border-gray-200" {...props}>
+                {children}
+            </code>
+        );
+    }
+
+    return (
+        <div className="relative my-4 rounded-lg overflow-hidden bg-[#1e1e1e] shadow-md border border-gray-800 group">
+            <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-gray-700">
+                <span className="text-xs text-gray-400 font-mono">{language || 'code'}</span>
+                <button 
+                    onClick={handleCopy}
+                    className="text-gray-400 hover:text-white transition-colors"
+                    title="Copy code"
+                >
+                    {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                </button>
+            </div>
+            <div className="overflow-x-auto p-4">
+                <code className={`${className} text-sm font-mono text-gray-200 block`} {...props}>
+                    {children}
+                </code>
+            </div>
+        </div>
+    );
+};
+
 // --- Chat Message Component ---
 const ChatMessage = ({ message, onCitationClick }: { message: any, onCitationClick: (docName: string, page?: number) => void }) => {
   const isUser = message.role === 'user';
-  
-  const renderContent = (text: string) => {
-     // Regex to capture [Source: filename, Page: X] or [Source: filename]
-     const parts = text.split(/(\[Source: [^\]]+\])/g);
-     
-     return parts.map((part, i) => {
-       const citationMatch = part.match(/^\[Source: (.*?)\]$/);
-       
-       if (citationMatch) {
-         const content = citationMatch[1]; // e.g., "doc.pdf, Page: 1"
-         
-         // Extract filename and page
-         let docName = content;
-         let pageNum: number | undefined = undefined;
+  const [copied, setCopied] = useState(false);
 
-         // Check for "Page:" marker
-         if (content.includes('Page:')) {
-            // Split by "Page:" 
-            // Expected format: "filename.ext, Page: X" or "filename.ext, Page: X-Y"
-            const splitParts = content.split('Page:');
-            // The first part is the name, possibly with a trailing comma and space
-            const namePart = splitParts[0];
-            const pagePart = splitParts[1];
-
-            // Cleanup name: trim spaces, then remove trailing comma
-            docName = namePart.trim().replace(/,$/, '');
-            
-            // Parse page number
-            const pageStr = pagePart.trim().split('-')[0]; // Handle ranges like 1-2
-            pageNum = parseInt(pageStr);
-         }
-
-         return (
-           <button 
-             key={i} 
-             onClick={() => onCitationClick(docName, pageNum)}
-             className="inline-flex items-center gap-1.5 mx-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer select-none group align-middle my-0.5" 
-             title={`View ${docName}${pageNum ? ` page ${pageNum}` : ''}`}
-           >
-             <FileText size={10} className="group-hover:scale-110 transition-transform" />
-             <span className="truncate max-w-[150px]">{content}</span>
-             <ChevronRight size={10} className="text-blue-400 group-hover:translate-x-0.5 transition-transform" />
-           </button>
-         );
-       }
-       return <ReactMarkdown key={i} className="inline prose prose-sm max-w-none text-gray-800">{part}</ReactMarkdown>;
-     });
+  const handleCopy = () => {
+      navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
   };
+  
+  // 1. Process text to extract sources and replace with [n] style links
+  const { processedText, sources } = useMemo(() => {
+    if (isUser || !message.text) return { processedText: message.text, sources: [] };
+
+    const regex = /\[Source: (.*?)\]/g;
+    const foundSources: any[] = [];
+    const sourceMap = new Map<string, number>();
+
+    const newText = message.text.replace(regex, (match: string, content: string) => {
+        let index = sourceMap.get(content);
+        if (index === undefined) {
+            index = foundSources.length + 1;
+            sourceMap.set(content, index);
+            
+            // Parse Details
+            let docName = content;
+            let pageNum: number | undefined;
+            if (content.includes('Page:')) {
+                const split = content.split('Page:');
+                docName = split[0].trim().replace(/,$/, '');
+                const pageStr = split[1].trim().split('-')[0];
+                pageNum = parseInt(pageStr);
+            }
+            foundSources.push({ id: index, content, docName, pageNum });
+        }
+        return `[[${index}]](citation://${index})`;
+    });
+
+    return { processedText: newText, sources: foundSources };
+  }, [message.text, isUser]);
+
+  // 2. Define Markdown components with custom link handler for citations
+  const markdownComponents: Components = useMemo(() => ({
+    code: CodeBlock,
+    a: ({ node, href, children, ...props }: any) => {
+        if (href?.startsWith('citation://')) {
+            const index = parseInt(href.replace('citation://', ''));
+            const source = sources.find((s: any) => s.id === index);
+            return (
+                <sup 
+                    onClick={() => source && onCitationClick(source.docName, source.pageNum)}
+                    className="cursor-pointer text-blue-600 font-bold hover:underline ml-0.5 select-none text-[10px] bg-blue-50 px-1 py-0.5 rounded-sm border border-blue-100"
+                    title={source?.content}
+                >
+                    {children}
+                </sup>
+            );
+        }
+        return <a className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" href={href} {...props}>{children}</a>;
+    },
+    ul: ({ node, ...props }: any) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+    ol: ({ node, ...props }: any) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
+    h1: ({ node, ...props }: any) => <h1 className="text-2xl font-bold my-4 text-gray-900" {...props} />,
+    h2: ({ node, ...props }: any) => <h2 className="text-xl font-bold my-3 text-gray-900" {...props} />,
+    h3: ({ node, ...props }: any) => <h3 className="text-lg font-bold my-2 text-gray-900" {...props} />,
+    p: ({ node, ...props }: any) => <p className="my-2 leading-relaxed" {...props} />,
+    table: ({ node, ...props }: any) => <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 shadow-sm"><table className="min-w-full divide-y divide-gray-200 bg-white" {...props} /></div>,
+    thead: ({ node, ...props }: any) => <thead className="bg-gray-50" {...props} />,
+    tbody: ({ node, ...props }: any) => <tbody className="divide-y divide-gray-200 bg-white" {...props} />,
+    tr: ({ node, ...props }: any) => <tr className="hover:bg-gray-50 transition-colors" {...props} />,
+    th: ({ node, ...props }: any) => <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" {...props} />,
+    td: ({ node, ...props }: any) => <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 border-t border-gray-100" {...props} />,
+  }), [sources, onCitationClick]);
 
   return (
-    <div className={`flex gap-4 w-full max-w-4xl mx-auto p-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex gap-4 w-full max-w-4xl mx-auto p-4 group ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm mt-1">
           <Bot size={16} />
@@ -151,18 +216,72 @@ const ChatMessage = ({ message, onCitationClick }: { message: any, onCitationCli
       
       <div className={`flex flex-col max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
         <div className={`
-          rounded-2xl px-5 py-3.5 shadow-sm
+          relative rounded-2xl px-5 py-3.5 shadow-sm
           ${isUser 
             ? 'bg-blue-600 text-white rounded-br-none' 
-            : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}
+            : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none w-full pr-10'}
         `}>
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.text}</p>
           ) : (
-            <div className="markdown-body leading-relaxed space-y-2">
-              {renderContent(message.text)}
-            </div>
+            <>
+                <div className="markdown-body leading-relaxed w-full">
+                    <ReactMarkdown 
+                        components={markdownComponents}
+                        remarkPlugins={[remarkGfm]}
+                        urlTransform={(url) => url} // Allow custom protocols like citation://
+                        className="text-gray-800"
+                    >
+                        {processedText}
+                    </ReactMarkdown>
+                </div>
+
+                {/* References / Bibliography Section */}
+                {sources.length > 0 && (
+                    <div className="mt-6 pt-4 border-t border-gray-200">
+                        <div className="flex items-center gap-2 mb-3 text-gray-500">
+                             <BookOpen size={14} />
+                             <span className="text-xs font-bold uppercase tracking-wider">Sources</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2">
+                            {sources.map((source: any) => (
+                                <button
+                                    key={source.id}
+                                    onClick={() => onCitationClick(source.docName, source.pageNum)}
+                                    className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all text-left group/btn w-full"
+                                >
+                                    <span className="flex items-center justify-center w-5 h-5 text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded shrink-0 mt-0.5">
+                                        {source.id}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-gray-900 truncate group-hover/btn:text-blue-700 transition-colors">
+                                            {source.docName}
+                                        </p>
+                                        {source.pageNum && (
+                                            <p className="text-xs text-gray-500">
+                                                Page {source.pageNum}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <ChevronRight size={14} className="text-gray-300 opacity-0 group-hover/btn:opacity-100 transition-opacity mt-1" />
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </>
           )}
+          
+          {!isUser && message.text && (
+            <button 
+                onClick={handleCopy}
+                className="absolute top-2 right-2 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                title="Copy response"
+            >
+                {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+            </button>
+          )}
+
         </div>
         <span className="text-[10px] text-gray-400 mt-1 px-1">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

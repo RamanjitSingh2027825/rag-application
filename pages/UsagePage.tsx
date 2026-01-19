@@ -61,9 +61,12 @@ export const UsagePage: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
                 <h3 className="text-lg font-semibold mb-6">Token Consumption Analysis</h3>
-                <div className="h-64">
+                {/* 
+                    Fixed: Added w-full and min-w-0 to ensure Recharts has dimensions to read within the Grid. 
+                */}
+                <div className="w-full h-64 min-w-0">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data} layout="vertical">
+                        <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                             <XAxis type="number" />
                             <YAxis dataKey="name" type="category" width={80} />
