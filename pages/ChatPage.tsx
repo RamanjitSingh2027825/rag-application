@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { streamGeminiResponse, estimateTokens, CHARS_PER_PAGE } from '../services/geminiService';
-import { Send, Plus, Bot, User, RefreshCw, FileText, X, ChevronRight, Copy, Check, BookOpen } from 'lucide-react';
+import { Send, Plus, Bot, User, RefreshCw, FileText, X, ChevronRight, Copy, Check, BookOpen, Edit2 } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FileUpload } from '../components/FileUpload';
@@ -229,7 +229,7 @@ const ChatMessage = ({ message, onCitationClick }: { message: any, onCitationCli
                     <ReactMarkdown 
                         components={markdownComponents}
                         remarkPlugins={[remarkGfm]}
-                        urlTransform={(url) => url} // Allow custom protocols like citation://
+                        urlTransform={(url) => url}
                         className="text-gray-800"
                     >
                         {processedText}
@@ -299,11 +299,25 @@ const ChatMessage = ({ message, onCitationClick }: { message: any, onCitationCli
 
 // --- Main Chat Page Component ---
 export const ChatPage: React.FC = () => {
-  const { messages, addMessage, updateLastMessage, documents, updateUsage, usage } = useApp();
+  const { 
+      messages, 
+      addMessage, 
+      updateLastMessage, 
+      documents, 
+      updateUsage, 
+      usage,
+      activeConversation,
+      renameChat
+  } = useApp();
+  
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [showQuickUpload, setShowQuickUpload] = useState(false);
   
+  // Title editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState('');
+
   // Citation Viewer State
   const [viewingCitation, setViewingCitation] = useState<{ doc: DocumentFile, page?: number } | null>(null);
 
@@ -324,6 +338,13 @@ export const ChatPage: React.FC = () => {
         inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
     }
   }, [input]);
+  
+  // Sync temp title
+  useEffect(() => {
+    if (activeConversation) {
+        setTempTitle(activeConversation.title);
+    }
+  }, [activeConversation]);
 
   const handleSend = async () => {
     if (!input.trim() || isGenerating) return;
@@ -346,7 +367,7 @@ export const ChatPage: React.FC = () => {
 
     try {
       await streamGeminiResponse(
-        messages,
+        messages, // Pass current messages as history
         userText,
         documents,
         (text) => {
@@ -373,26 +394,23 @@ export const ChatPage: React.FC = () => {
       handleSend();
     }
   };
+  
+  const saveTitle = () => {
+    if (activeConversation && tempTitle.trim()) {
+        renameChat(activeConversation.id, tempTitle.trim());
+    }
+    setIsEditingTitle(false);
+  };
 
   const handleCitationClick = (docName: string, page?: number) => {
-    // 1. Try exact match
     let doc = documents.find(d => d.name === docName);
-    
-    // 2. Try match after trimming potential extra spaces
-    if (!doc) {
-        doc = documents.find(d => d.name.trim() === docName.trim());
-    }
-
-    // 3. Try partial match (if LLM shortened the name)
-    if (!doc) {
-         doc = documents.find(d => d.name.includes(docName) || docName.includes(d.name));
-    }
+    if (!doc) doc = documents.find(d => d.name.trim() === docName.trim());
+    if (!doc) doc = documents.find(d => d.name.includes(docName) || docName.includes(d.name));
 
     if (doc) {
       setViewingCitation({ doc, page });
     } else {
       console.warn("Document not found for citation:", `"${docName}"`);
-      // Could show a toast here
     }
   };
 
@@ -406,9 +424,35 @@ export const ChatPage: React.FC = () => {
           onClose={() => setViewingCitation(null)} 
         />
       )}
+      
+      {/* Chat Header for Title */}
+      {activeConversation && (
+        <div className="absolute top-0 left-0 right-0 z-10 p-4 flex justify-center pointer-events-none">
+            <div className="bg-white/80 backdrop-blur-sm border border-gray-200/50 shadow-sm rounded-full px-4 py-1.5 pointer-events-auto flex items-center gap-2 max-w-md">
+                {isEditingTitle ? (
+                    <input 
+                        autoFocus
+                        value={tempTitle}
+                        onChange={(e) => setTempTitle(e.target.value)}
+                        onBlur={saveTitle}
+                        onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
+                        className="bg-transparent border-none focus:ring-0 text-sm font-medium text-center w-full"
+                    />
+                ) : (
+                    <button 
+                        onClick={() => setIsEditingTitle(true)}
+                        className="text-sm font-medium text-gray-700 truncate max-w-[200px] hover:text-blue-600 transition-colors flex items-center gap-2 group"
+                    >
+                        {activeConversation.title}
+                        <Edit2 size={12} className="opacity-0 group-hover:opacity-50" />
+                    </button>
+                )}
+            </div>
+        </div>
+      )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto pb-32 pt-6">
+      <div className="flex-1 overflow-y-auto pb-32 pt-16">
         {messages.length === 1 && (
             <div className="flex flex-col items-center justify-center h-[60vh] opacity-50">
                 <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4">

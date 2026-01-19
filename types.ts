@@ -17,6 +17,14 @@ export interface Message {
   citations?: string[];
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UsageStats {
   daily: number;
   monthly: number;
@@ -33,7 +41,8 @@ export interface UserProfile {
 
 export interface AppState {
   documents: DocumentFile[];
-  messages: Message[];
+  conversations: Conversation[];
+  activeConversationId: string | null;
   usage: UsageStats;
   user: UserProfile;
 }
